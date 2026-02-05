@@ -26,10 +26,13 @@ struct {
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
-}
 
+  //initlock(&kmem.lock, "kmem");
+  int num_pages = (PHYSTOP - (uint64)end) / PGSIZE;
+  buddy_init(end, num_pages);
+  //freerange(end, (void*)PHYSTOP);
+}
+/*
 void
 freerange(void *pa_start, void *pa_end)
 {
@@ -37,7 +40,7 @@ freerange(void *pa_start, void *pa_end)
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
-}
+}*/
 
 // Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a
@@ -46,6 +49,8 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
+  buddy_free(pa);
+  /*
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
@@ -60,6 +65,7 @@ kfree(void *pa)
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
+  */
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -68,6 +74,8 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
+  return buddy_alloc(1);
+  /*
   struct run *r;
 
   acquire(&kmem.lock);
@@ -79,4 +87,5 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+  */
 }

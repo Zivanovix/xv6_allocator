@@ -183,3 +183,8 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+// buddy.c
+void            buddy_init(void* space, int num_pages);
+void            buddy_free(void* addr);
+void*           buddy_alloc(int num_pages);

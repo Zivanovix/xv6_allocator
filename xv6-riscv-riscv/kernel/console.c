@@ -23,7 +23,7 @@
 #include "proc.h"
 
 #define BACKSPACE 0x100  // erase the last output character
-#define C(x)  ((x)-'@')  // Control-x
+#define C(x) ((x)-'@')  // Control-x
 
 //
 // send one character to the uart, but don't use
