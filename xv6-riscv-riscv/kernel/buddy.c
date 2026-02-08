@@ -136,6 +136,10 @@ void* buddy_alloc(int num_pages) {
     for(int i = foundorder; i > order; --i) {
         c->order--;
         struct buddy_block* bud = find_buddy(c);
+        if(bud == 0) {
+            release(&kbuddy.lock);
+            return 0;
+        }
         bud->order = i-1;
         bud->is_free = 1;
         push_front(bud);
@@ -147,6 +151,10 @@ void* buddy_alloc(int num_pages) {
 
 void buddy_free(void* addr) {
     int idx = ((uint64)addr - (uint64)kbuddy.base_addr) / PGSIZE;
+
+    if (idx < 0 || idx >= kbuddy.total_pages) {
+        return;
+    }
     struct buddy_block* c = kbuddy.descriptors + idx;
     acquire(&kbuddy.lock);
 

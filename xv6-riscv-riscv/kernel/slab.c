@@ -6,6 +6,8 @@
 
 // Align obj size to a first greater number that is divisible by 8
 #define ALIGN(size) (((size) + 7) & ~7)
+#define NUM_GENERIC_CACHES 13
+#define MAX_CACHES 40
 
 // metadata about a single slab
 typedef struct slab_s {
@@ -20,7 +22,7 @@ typedef struct slab_s {
 struct kmem_cache_s {
     struct spinlock lock;
     char name[16];
-    size_t obj_size; // ALIGNED size
+    size_t obj_size; // ALIGNED size + pointer to next when slot is free
     int obj_per_slab;
     int slab_pages;  // Single slab size in pages
 
@@ -34,12 +36,38 @@ struct kmem_cache_s {
     kmem_cache_t* next_cache;
     int error_code;
     int in_use; // flag for static pool of caches
+    int expanded;
 };
 
-#define MAX_CACHES 40
-static kmem_cache_t cache_pool[MAX_CACHES];
-static kmem_cache_t* cache_chain = 0; // head of all caches list
-struct spinlock cache_chain_lock; // Global lock for chace list
+kmem_cache_t cache_pool[MAX_CACHES];
+
+kmem_cache_t* cache_chain = 0; // head of all caches list
+struct spinlock cache_chain_lock; // Global lock for cache list
+
+kmem_cache_t* generic_caches[NUM_GENERIC_CACHES];
+static char* generic_cache_names[] = {
+    "size-32", "size-64", "size-128", "size-256", "size-512",
+    "size-1024", "size-2048", "size-4096", "size-8192", "size-16384",
+    "size-32768", "size-65536", "size-131072"
+};
+
+int get_generic_cache_index(size_t size) {
+    if(size < 32) return -1;
+    if(size == 32) return 0;
+    int idx = 0;
+
+    size_t current_size = 32;
+    while(current_size < size && idx < NUM_GENERIC_CACHES - 1) {
+        current_size <<= 1;
+        idx++;
+    }
+    return idx;
+}
+
+
+size_t get_size_from_index(int idx) {
+    return (size_t)1 << (5 + idx);
+}
 
 void kmem_init(void* space, int block_num) {
     buddy_init(space, block_num);
@@ -49,6 +77,10 @@ void kmem_init(void* space, int block_num) {
     for(int i = 0; i < MAX_CACHES; ++i) {
         cache_pool[i].in_use = 0;
         initlock(&cache_pool[i].lock, "cache_lock");
+    }
+
+    for(int i = 0; i < NUM_GENERIC_CACHES; ++i) {
+        generic_caches[i] = 0;
     }
 }
 
@@ -76,6 +108,7 @@ kmem_cache_t* kmem_cache_create(const char* name, size_t size, void (*ctor)(void
     cp->slabs_full = 0;
     cp->slabs_partial = 0;
     cp->slabs_free = 0;
+    cp->expanded = 0;
 
     size_t slab_header_size = ALIGN(sizeof(slab_t));
     size_t min_need = slab_header_size + cp->obj_size;
@@ -136,6 +169,7 @@ slab_t* alloc_new_slab(kmem_cache_t* cachep) {
 
     if(mem == 0) return 0;
 
+    cachep->expanded = 1;
     slab_t* s = (slab_t*)mem;
     s->cache = cachep;
     s->used_count = 0;
@@ -159,6 +193,7 @@ void* kmem_cache_alloc(kmem_cache_t* cachep) {
     void* ret = 0;
     slab_t* s = 0;
     int freeSlabUsed = 0;
+
     acquire(&cachep->lock);
 
     if(cachep->slabs_partial != 0) {
@@ -214,7 +249,7 @@ void kmem_cache_free(kmem_cache_t* cachep, void* obj) {
         }
     }
     if(!s) {
-        for (s = cachep->slabs_partial; s; s = s->next) {
+        for (s = cachep->slabs_full; s; s = s->next) {
             if(slot >= (void*)s && slot < (void*)((char*)s + cachep->slab_pages * BLOCK_SIZE)) {
                 break;
             }
@@ -229,16 +264,140 @@ void kmem_cache_free(kmem_cache_t* cachep, void* obj) {
     // return slot back to the free list in slab
     *(void**)slot = s->free_slots;
     s->free_slots = (void*)slot;
+    s->used_count--;
 
-    if(s->used_count == cachep->obj_per_slab) {
+    if(s->used_count == cachep->obj_per_slab-1) {
         detach_slab(s, &cachep->slabs_full);
-        push_slab_to_front(s, &cachep->slabs_partial);
+        if(s->used_count == 0) {
+            push_slab_to_front(s, &cachep->slabs_free);
+        }
+        else {
+            push_slab_to_front(s, &cachep->slabs_partial);
+        }
     }
-    else if(s->used_count == 1) {
+    else if(s->used_count == 0) {
         detach_slab(s, &cachep->slabs_partial);
         push_slab_to_front(s, &cachep->slabs_free);
     }
-    s->used_count--;
 
     release(&cachep->lock);
+}
+
+void clean_slab_objects(kmem_cache_t* cp, slab_t* s) {
+    if (cp->dtor) {
+        char* slot_ptr = (char*)s + ALIGN(sizeof(slab_t));
+        for(int i = 0; i < cp->obj_per_slab; ++i) {
+            cp->dtor(slot_ptr + 8); // call dtor on user part of slot
+            slot_ptr += cp->obj_size;
+        }
+    }
+}
+
+int kmem_cache_shrink(kmem_cache_t *cachep) {
+    if(!cachep) return 0;
+
+    acquire(&cachep->lock);
+
+    if(cachep->expanded) {
+        cachep->expanded = 0;
+        release(&cachep->lock);
+        return 0;
+    }
+    int ret = 0;
+
+    slab_t* next_slab = 0;
+    for(slab_t* s = cachep->slabs_free; s; s = next_slab) {
+        next_slab = s->next;
+        clean_slab_objects(cachep, s);
+        buddy_free(s, cachep->slab_pages);
+        ret += cachep->slab_pages;
+    }
+
+    cachep->slabs_free = 0;
+    release(&cachep->lock);
+
+    return ret;
+}
+
+void kmem_cache_destroy(kmem_cache_t* cachep) {
+    if(!cachep) return;
+
+    // delete from global cache chain
+    acquire(&cache_chain_lock);
+
+    kmem_cache_t **prev = &cache_chain;
+
+    while(*prev && *prev != cachep) {
+        prev = &((*prev)->next_cache);
+    }
+    if(*prev) {
+        *prev = cachep->next_cache;
+    }
+    cachep->next_cache = 0;
+
+    release(&cache_chain_lock);
+
+    acquire(&cachep->lock);
+
+    slab_t* lists[] = {cachep->slabs_full, cachep->slabs_partial, cachep->slabs_free};
+    for(int i = 0; i < 3; ++i) {
+        slab_t* s = lists[i];
+        while(s) {
+            slab_t* next_slab = s->next;
+            clean_slab_objects(cachep, s);
+            buddy_free(s, cachep->slab_pages);
+            s = next_slab;
+        }
+    }
+
+    cachep->in_use = 0;
+    release(&cachep->lock);
+}
+
+void* kmalloc(size_t size) {
+    if (size > (1 << 17)) return 0;
+
+    int idx = get_generic_cache_index(size);
+
+    acquire(&cache_chain_lock);
+    if (generic_caches[idx] == 0) {
+        generic_caches[idx] = kmem_cache_create(generic_cache_names[idx], get_size_from_index(idx), 0, 0);
+    }
+    release(&cache_chain_lock);
+
+    if (generic_caches[idx] == 0) return 0;
+
+    return kmem_cache_alloc(generic_caches[idx]);
+}
+
+
+void kfree(const void* obj) {
+    if (obj == 0) return;
+
+    acquire(&cache_chain_lock);
+    kmem_cache_t* cp = cache_chain;
+
+    while (cp) {
+        acquire(&cp->lock);
+
+        slab_t* lists[] = {cp->slabs_partial, cp->slabs_full};
+        for (int i = 0; i < 2; i++) {
+            for (slab_t* s = lists[i]; s; s = s->next) {
+
+                char* start = (char*)s;
+                char* end = start + (cp->slab_pages * BLOCK_SIZE);
+
+                if ((char*)obj >= start && (char*)obj < end) {
+                    release(&cp->lock);
+                    release(&cache_chain_lock);
+                    kmem_cache_free(cp, (void*)obj);
+                    return;
+                }
+            }
+        }
+
+        release(&cp->lock);
+        cp = cp->next_cache;
+    }
+    release(&cache_chain_lock);
 }
