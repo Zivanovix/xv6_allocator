@@ -3,9 +3,10 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
+#include "slab.h"
 
 volatile static int started = 0;
-
+extern void pipe_init_cache(void);
 // start() jumps here in supervisor mode on all CPUs.
 void
 main()
@@ -28,6 +29,9 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
+
+    pipe_init_cache();
+
     userinit();      // first user process
     __sync_synchronize();
     started = 1;

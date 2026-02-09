@@ -20,6 +20,7 @@
 #include "fs.h"
 #include "buf.h"
 #include "file.h"
+#include "slab.h"
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
@@ -176,18 +177,22 @@ bfree(int dev, uint b)
 
 struct {
   struct spinlock lock;
-  struct inode inode[NINODE];
+  //struct inode inode[NINODE];
+  kmem_cache_t* cache;
+  struct inode* list;
 } itable;
 
 void
 iinit()
 {
-  int i = 0;
-  
+
   initlock(&itable.lock, "itable");
-  for(i = 0; i < NINODE; i++) {
-    initsleeplock(&itable.inode[i].lock, "inode");
-  }
+
+  itable.cache = kmem_cache_create("inode", sizeof(struct inode), 0, 0);
+  if(itable.cache == 0)
+    panic("iinit: no mem for inode cache");
+
+  itable.list = 0;
 }
 
 static struct inode* iget(uint dev, uint inum);
@@ -247,31 +252,35 @@ iupdate(struct inode *ip)
 static struct inode*
 iget(uint dev, uint inum)
 {
-  struct inode *ip, *empty;
+  struct inode *ip;
 
   acquire(&itable.lock);
 
   // Is the inode already in the table?
-  empty = 0;
-  for(ip = &itable.inode[0]; ip < &itable.inode[NINODE]; ip++){
-    if(ip->ref > 0 && ip->dev == dev && ip->inum == inum){
+  for(ip = itable.list; ip != 0; ip = ip->next){
+    if(ip->dev == dev && ip->inum == inum){
       ip->ref++;
       release(&itable.lock);
       return ip;
     }
-    if(empty == 0 && ip->ref == 0)    // Remember empty slot.
-      empty = ip;
   }
 
   // Recycle an inode entry.
-  if(empty == 0)
+  ip = kmem_cache_alloc(itable.cache);
+  if(ip == 0) {
+    release(&itable.lock);
     panic("iget: no inodes");
+    return 0;
+  }
 
-  ip = empty;
+  initsleeplock(&ip->lock, "inode");
   ip->dev = dev;
   ip->inum = inum;
   ip->ref = 1;
   ip->valid = 0;
+  ip->next = itable.list;
+  itable.list = ip;
+
   release(&itable.lock);
 
   return ip;
@@ -359,6 +368,20 @@ iput(struct inode *ip)
   }
 
   ip->ref--;
+
+  if(ip->ref == 0){
+    struct inode **pp = &itable.list;
+    while(*pp != 0){
+      if(*pp == ip){
+        *pp = ip->next; // Izbacivanje iz liste
+        break;
+      }
+      pp = &((*pp)->next);
+    }
+
+    kmem_cache_free(itable.cache, ip);
+  }
+
   release(&itable.lock);
 }
 

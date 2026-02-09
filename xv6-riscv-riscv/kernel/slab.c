@@ -45,11 +45,12 @@ kmem_cache_t* cache_chain = 0; // head of all caches list
 struct spinlock cache_chain_lock; // Global lock for cache list
 
 kmem_cache_t* generic_caches[NUM_GENERIC_CACHES];
-static char* generic_cache_names[] = {
+
+/*char* generic_cache_names[] = {
     "size-32", "size-64", "size-128", "size-256", "size-512",
     "size-1024", "size-2048", "size-4096", "size-8192", "size-16384",
     "size-32768", "size-65536", "size-131072"
-};
+};*/
 
 int get_generic_cache_index(size_t size) {
     if(size < 32) return -1;
@@ -244,13 +245,13 @@ void kmem_cache_free(kmem_cache_t* cachep, void* obj) {
     slab_t* s = 0;
 
     for (s = cachep->slabs_partial; s; s = s->next) {
-        if(slot >= (void*)s && slot < (void*)((char*)s + cachep->slab_pages * BLOCK_SIZE)) {
+        if(slot > (void*)s && slot < (void*)((char*)s + cachep->slab_pages * BLOCK_SIZE)) {
             break;
         }
     }
     if(!s) {
         for (s = cachep->slabs_full; s; s = s->next) {
-            if(slot >= (void*)s && slot < (void*)((char*)s + cachep->slab_pages * BLOCK_SIZE)) {
+            if(slot > (void*)s && slot < (void*)((char*)s + cachep->slab_pages * BLOCK_SIZE)) {
                 break;
             }
         }
@@ -277,17 +278,19 @@ void kmem_cache_free(kmem_cache_t* cachep, void* obj) {
     }
     else if(s->used_count == 0) {
         detach_slab(s, &cachep->slabs_partial);
+        //buddy_free(s);
         push_slab_to_front(s, &cachep->slabs_free);
     }
 
     release(&cachep->lock);
 }
+/*
 
 void clean_slab_objects(kmem_cache_t* cp, slab_t* s) {
     if (cp->dtor) {
         char* slot_ptr = (char*)s + ALIGN(sizeof(slab_t));
         for(int i = 0; i < cp->obj_per_slab; ++i) {
-            cp->dtor(slot_ptr + 8); // call dtor on user part of slot
+            cp->dtor((void*)(slot_ptr + 8)); // call dtor on user part of slot
             slot_ptr += cp->obj_size;
         }
     }
@@ -371,13 +374,15 @@ void* kmalloc(size_t size) {
 }
 
 
-void kfree(const void* obj) {
+void buff_kfree(const void* obj) {
     if (obj == 0) return;
 
-    acquire(&cache_chain_lock);
-    kmem_cache_t* cp = cache_chain;
+    //acquire(&cache_chain_lock);
+    kmem_cache_t* cp = 0;
 
-    while (cp) {
+    for(int i = 0; i < NUM_GENERIC_CACHES; ++i) {
+        if(generic_caches[i]->in_use == 0) continue;
+        cp = generic_caches[i];
         acquire(&cp->lock);
 
         slab_t* lists[] = {cp->slabs_partial, cp->slabs_full};
@@ -387,9 +392,9 @@ void kfree(const void* obj) {
                 char* start = (char*)s;
                 char* end = start + (cp->slab_pages * BLOCK_SIZE);
 
-                if ((char*)obj >= start && (char*)obj < end) {
+                if ((char*)obj > start && (char*)obj < end) {
                     release(&cp->lock);
-                    release(&cache_chain_lock);
+                    //release(&cache_chain_lock);
                     kmem_cache_free(cp, (void*)obj);
                     return;
                 }
@@ -397,7 +402,8 @@ void kfree(const void* obj) {
         }
 
         release(&cp->lock);
-        cp = cp->next_cache;
+        //cp = cp->next_cache;
     }
     release(&cache_chain_lock);
 }
+*/

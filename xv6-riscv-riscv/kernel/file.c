@@ -12,35 +12,44 @@
 #include "file.h"
 #include "stat.h"
 #include "proc.h"
+#include "slab.h"
 
+// this is just a table to connect major number of device with its read and write functions, it will not change
+// so there is no need to allocate a full slab (at least one page) for this
 struct devsw devsw[NDEV];
+
 struct {
   struct spinlock lock;
-  struct file file[NFILE];
+  //struct file file[NFILE];
+  kmem_cache_t* cache;
 } ftable;
 
 void
 fileinit(void)
 {
   initlock(&ftable.lock, "ftable");
+  ftable.cache = kmem_cache_create("file_cache", sizeof(struct file), 0, 0);
+  if (ftable.cache == 0)
+    panic("fileinit: cache create failed");
 }
 
 // Allocate a file structure.
 struct file*
 filealloc(void)
 {
-  struct file *f;
+  struct file* f = kmem_cache_alloc(ftable.cache);
+  if (f == 0)
+    return 0;
 
   acquire(&ftable.lock);
-  for(f = ftable.file; f < ftable.file + NFILE; f++){
-    if(f->ref == 0){
-      f->ref = 1;
-      release(&ftable.lock);
-      return f;
-    }
-  }
+  f->ref = 1;
+  f->off = 0;
+  f->type = FD_NONE;
+  f->readable = 0;
+  f->writable = 0;
   release(&ftable.lock);
-  return 0;
+
+  return f;
 }
 
 // Increment ref count for file f.
@@ -80,6 +89,7 @@ fileclose(struct file *f)
     iput(ff.ip);
     end_op();
   }
+  kmem_cache_free(ftable.cache, f);
 }
 
 // Get metadata about file f.

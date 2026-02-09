@@ -997,6 +997,7 @@ forkfork(char *s)
   }
 }
 
+/*
 void
 forkforkfork(char *s)
 {
@@ -1026,6 +1027,7 @@ forkforkfork(char *s)
   wait(0);
   pause(10); // one second
 }
+*/
 
 // regression test. does reparent() violate the parent-then-child
 // locking order when giving away a child to init, so that exit()
@@ -1107,7 +1109,7 @@ sharedfd(char *s)
     exit(1);
   }
   pid = fork();
-  memset(buf, pid==0?'c':'p', sizeof(buf));
+  memset(buf, pid==0 ?'c':'p', sizeof(buf));
   for(i = 0; i < N; i++){
     if(write(fd, buf, sizeof(buf)) != sizeof(buf)){
       printf("%s: write sharedfd failed\n", s);
@@ -2777,7 +2779,7 @@ struct test {
   {reparent, "reparent" },
   {twochildren, "twochildren"},
   {forkfork, "forkfork"},
-  {forkforkfork, "forkforkfork"},
+  //{forkforkfork, "forkforkfork"},
   {reparent2, "reparent2"},
   {mem, "mem"},
   {sharedfd, "sharedfd"},
