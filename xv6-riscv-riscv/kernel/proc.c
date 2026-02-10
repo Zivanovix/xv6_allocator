@@ -35,25 +35,6 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
-// Allocate a page for each process's kernel stack.
-// Map it high in memory, followed by an invalid
-// guard page.
-
-/*
-void
-proc_mapstacks(pagetable_t kpgtbl)
-{
-  struct proc *p;
-
-  for(p = proc; p < &proc[NPROC]; p++) {
-    char *pa = kalloc();
-    if(pa == 0)
-      panic("kalloc");
-    uint64 va = KSTACK((int) (p - proc));
-    kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  }
-}
-*/
 
 // initialize the proc table.
 void
@@ -66,6 +47,7 @@ procinit(void)
   proc_cache = kmem_cache_create("proc", sizeof(struct proc), 0, 0);
   if(proc_cache == 0)
     panic("procinit: no mem for proc cache");
+
 }
 
 // Must be called with interrupts disabled,
@@ -129,6 +111,13 @@ allocproc(void)
   p->state = USED;
   p->pid = allocpid();
 
+  p->ofile = (struct file**) kmalloc(NOFILE * sizeof(struct file*));
+  if(p->ofile == 0){
+    kmem_cache_free(proc_cache, p);
+    return 0;
+  }
+  memset(p->ofile, 0, NOFILE * sizeof(struct file *));
+
   // stack allocation
   if((p->kstack = (uint64)kalloc()) == 0) {
     kmem_cache_free(proc_cache, p);
@@ -149,7 +138,7 @@ allocproc(void)
     kmem_cache_free(proc_cache, p);
     return 0;
   }
-  memset(&p->ofile, 0, sizeof(p->ofile));
+
 
   // Context setup
   memset(&p->context, 0, sizeof(p->context));
@@ -188,7 +177,9 @@ freeproc(struct proc *p)
   if(p->kstack)
     kfree((void*)p->kstack);
   p->kstack = 0;
-
+  if(p->ofile)
+    buff_kfree(p->ofile);
+  p->ofile = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -375,6 +366,7 @@ kexit(int status)
       p->ofile[fd] = 0;
     }
   }
+
 
   begin_op();
   iput(p->cwd);

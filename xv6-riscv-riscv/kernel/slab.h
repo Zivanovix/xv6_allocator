@@ -18,9 +18,10 @@ void kmem_cache_free(kmem_cache_t *cachep, void *objp); // Deallocate one object
 
 
 void *kmalloc(size_t size); // Alloacate one small memory buffer
-/*
+
 void buff_kfree(const void *objp); // Deallocate one small memory buffer
 
+/*
 void kmem_cache_destroy(kmem_cache_t *cachep); // Deallocate cache
 
 

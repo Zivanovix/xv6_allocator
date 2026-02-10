@@ -372,7 +372,7 @@ void* kmalloc(size_t size) {
     return kmem_cache_alloc(generic_caches[idx]);
 }
 
-/*
+
 void buff_kfree(const void* obj) {
     if (obj == 0) return;
 
@@ -380,6 +380,7 @@ void buff_kfree(const void* obj) {
     kmem_cache_t* cp = 0;
 
     for(int i = 0; i < NUM_GENERIC_CACHES; ++i) {
+        if(!generic_caches[i]) continue;
         if(generic_caches[i]->in_use == 0) continue;
         cp = generic_caches[i];
         acquire(&cp->lock);
@@ -403,6 +404,5 @@ void buff_kfree(const void* obj) {
         release(&cp->lock);
         //cp = cp->next_cache;
     }
-    release(&cache_chain_lock);
+    //release(&cache_chain_lock);
 }
-*/

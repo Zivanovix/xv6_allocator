@@ -24,6 +24,8 @@
 #include "buf.h"
 #include "slab.h"
 
+kmem_cache_t* buf_cache;
+
 struct {
   struct spinlock lock;
   //struct buf buf[NBUF];
@@ -41,18 +43,27 @@ binit(void)
 
   initlock(&bcache.lock, "bcache");
 
-  bcache.head = (struct buf*) kmalloc(sizeof(struct buf));
+  buf_cache = kmem_cache_create("buf_cache", sizeof(struct buf), 0, 0);
+  if(buf_cache == 0)
+    panic("binit: buf_cache create failed");
+
+  bcache.head = (struct buf*) kmem_cache_alloc(buf_cache);
   if(bcache.head == 0)
-    panic("binit: head kmalloc failed");
+    panic("binit: head alloc failed");
 
 
   bcache.head->prev = bcache.head;
   bcache.head->next = bcache.head;
+  bcache.head->data = 0;
 
   for(int i = 0; i < NBUF; i++){
-    b = (struct buf*) kmalloc(sizeof(struct buf));
+    b = (struct buf*) kmem_cache_alloc(buf_cache);
     if(b == 0)
       panic("binit: kmalloc failed");
+
+    b->data = (uchar*) kmalloc(BSIZE);
+    if(b->data == 0)
+      panic("binit: data kmalloc failed");
 
     initsleeplock(&b->lock, "buffer");
     b->refcnt = 0;
