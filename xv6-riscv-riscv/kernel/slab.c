@@ -46,11 +46,11 @@ struct spinlock cache_chain_lock; // Global lock for cache list
 
 kmem_cache_t* generic_caches[NUM_GENERIC_CACHES];
 
-/*char* generic_cache_names[] = {
+char* generic_cache_names[] = {
     "size-32", "size-64", "size-128", "size-256", "size-512",
     "size-1024", "size-2048", "size-4096", "size-8192", "size-16384",
     "size-32768", "size-65536", "size-131072"
-};*/
+};
 
 int get_generic_cache_index(size_t size) {
     if(size < 32) return -1;
@@ -356,24 +356,23 @@ void kmem_cache_destroy(kmem_cache_t* cachep) {
     cachep->in_use = 0;
     release(&cachep->lock);
 }
-
+*/
 void* kmalloc(size_t size) {
     if (size > (1 << 17)) return 0;
 
     int idx = get_generic_cache_index(size);
 
-    acquire(&cache_chain_lock);
     if (generic_caches[idx] == 0) {
         generic_caches[idx] = kmem_cache_create(generic_cache_names[idx], get_size_from_index(idx), 0, 0);
     }
-    release(&cache_chain_lock);
+
 
     if (generic_caches[idx] == 0) return 0;
 
     return kmem_cache_alloc(generic_caches[idx]);
 }
 
-
+/*
 void buff_kfree(const void* obj) {
     if (obj == 0) return;
 

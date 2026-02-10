@@ -21,6 +21,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "proc.h"
+#include "slab.h"
 
 #define BACKSPACE 0x100  // erase the last output character
 #define C(x) ((x)-'@')  // Control-x
@@ -47,7 +48,7 @@ struct {
   
   // input circular buffer
 #define INPUT_BUF_SIZE 128
-  char buf[INPUT_BUF_SIZE];
+  char* buf;
   uint r;  // Read index
   uint w;  // Write index
   uint e;  // Edit index
@@ -188,6 +189,10 @@ void
 consoleinit(void)
 {
   initlock(&cons.lock, "cons");
+
+  cons.buf = kmalloc(INPUT_BUF_SIZE);
+  if(cons.buf == 0)
+    panic("consoleinit: kmalloc failed");
 
   uartinit();
 
