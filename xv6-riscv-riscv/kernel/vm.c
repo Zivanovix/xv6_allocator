@@ -323,6 +323,37 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   return -1;
 }
 
+
+int
+mirror_user_pagetable(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  //char *mem;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      continue;   // page table entry hasn't been allocated
+    if((*pte & PTE_V) == 0)
+      continue;   // physical page hasn't been allocated
+    pa = PTE2PA(*pte);
+    flags = (PTE_FLAGS(*pte) & ~PTE_U);
+    /*if((mem = kalloc()) == 0)
+      goto err;
+    memmove(mem, (char*)pa, PGSIZE);*/
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      goto err;
+    }
+  }
+  return 0;
+
+  err:
+   uvmunmap(new, 0, i / PGSIZE, 0);
+   return -1;
+}
+
+
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
 void
